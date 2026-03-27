@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  password  String   // bcrypt hashed
+  role      String   @default("user") // user, admin
+  balance   Decimal  @default(0) @db.Decimal(10, 4)
+  status    String   @default("active") // active, suspended, deleted
+  
+  apiKeys       ApiKey[]
+  usageRecords  UsageRecord[]
+  invoices      Invoice[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model ApiKey {
+  id          String   @id @default(uuid())
+  userId      String
+  keyHash     String   @unique // bcrypt hashed
+  name        String?
+  permissions Json     @default("[]") // ["chat", "embeddings"]
+  rateLimit   Json?    // { rpm: 60, tpm: 100000 }
+  ipWhitelist String[] @default([])
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  status      String   @default("active") // active, revoked
+  
+  user         User          @relation(fields: [userId], references: [id])
+  usageRecords UsageRecord[]
+  
+  createdAt DateTime @default(now())
+  
+  @@map("api_keys")
+}
+
+model Model {
+  id            String   @id
+  name          String
+  provider      String   // openai, anthropic, google, azure, baidu, alibaba
+  description   String?
+  
+  // 定价（USD per 1K tokens）
+  pricingInput  Decimal  @db.Decimal(10, 8)
+  pricingOutput Decimal  @db.Decimal(10, 8)
+  
+  contextWindow Int      // 最大上下文长度
+  features      Json     @default("[\"chat\"]") // ["chat", "embeddings", "vision"]
+  
+  status        String   @default("active") // active, deprecated, beta
+  
+  usageRecords  UsageRecord[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("models")
+}
+
+model Channel {
+  id              String   @id @default(uuid())
+  name            String
+  provider        String   // openai, anthropic, google, azure, baidu, alibaba
+  type            String   @default("enterprise") // enterprise, reseller, proxy
+  
+  credentials     Json     // { apiKey, baseUrl, orgId, etc }
+  rateLimit       Json?    // { rpm, tpm, rpd }
+  supportedModels String[] @default([]) // 支持的模型列表
+  
+  priority        Int      @default(1) // 越小优先级越高
+  weight          Int      @default(100) // 负载均衡权重
+  
+  status          String   @default("active") // active, inactive, error
+  lastError       String?
+  lastErrorAt     DateTime?
+  
+  usageRecords    UsageRecord[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("channels")
+}
+
+model UsageRecord {
+  id        String   @id @default(uuid())
+  
+  userId    String
+  apiKeyId  String
+  modelId   String
+  channelId String
+  
+  inputTokens   Int
+  outputTokens  Int
+  cost          Decimal @db.Decimal(10, 8)
+  
+  // 请求元数据
+  requestIp     String?
+  requestPath   String?
+  responseTime  Int?     // 响应时间（毫秒）
+  
+  user    User    @relation(fields: [userId], references: [id])
+  apiKey  ApiKey  @relation(fields: [apiKeyId], references: [id])
+  model   Model   @relation(fields: [modelId], references: [id])
+  channel Channel @relation(fields: [channelId], references: [id])
+  
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([modelId, createdAt])
+  @@index([channelId, createdAt])
+  @@map("usage_records")
+}
+
+model Invoice {
+  id          String   @id @default(uuid())
+  userId      String
+  
+  periodStart Date
+  periodEnd   Date
+  
+  totalRequests   Int
+  totalInputTokens  Int
+  totalOutputTokens Int
+  totalCost       Decimal @db.Decimal(10, 4)
+  
+  currency    String   @default("USD")
+  status      String   @default("pending") // pending, paid, cancelled
+  paidAt      DateTime?
+  
+  user User @relation(fields: [userId], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("invoices")
+}
+
+// 系统配置表
+model Config {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("configs")
+}

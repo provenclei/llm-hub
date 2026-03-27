@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:16-alpine
+    container_name: llm-hub-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: llm_hub
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: llm-hub-redis
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # API 服务
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    container_name: llm-hub-api
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/llm_hub?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      API_KEY_SALT: ${API_KEY_SALT:-change-me}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: llm-hub-nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

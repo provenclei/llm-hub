@@ -1,0 +1,296 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 用户表
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  password    String
+  name        String?
+  role        UserRole @default(USER)
+  status      UserStatus @default(ACTIVE)
+  balance     Decimal  @default(0) @db.Decimal(18, 6)
+  
+  // 配额限制
+  quotaRequestsPerMin  Int @default(60)
+  quotaTokensPerMin    Int @default(100000)
+  quotaRequestsPerDay  Int @default(10000)
+  quotaTokensPerDay    Int @default(10000000)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联
+  apiKeys     ApiKey[]
+  transactions Transaction[]
+  usages      Usage[]
+  
+  @@map("users")
+}
+
+// API密钥表
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  keyHash     String    @unique
+  keyPrefix   String
+  permissions ApiKeyPermission[] @default([CHAT])
+  
+  // 自定义限制（覆盖用户级别）
+  rateLimitReqPerMin  Int?
+  rateLimitTokensPerMin Int?
+  allowedModels       String[]
+  blockedModels       String[]
+  
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  isRevoked   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usages      Usage[]
+  
+  @@map("api_keys")
+}
+
+// 渠道商账号表（批量采购）
+model ProviderAccount {
+  id          String   @id @default(cuid())
+  provider    ProviderType
+  name        String
+  apiKey      String   // 加密存储
+  apiSecret   String?  // 加密存储
+  baseUrl     String?
+  
+  // 成本与库存
+  costPer1kInput   Decimal @db.Decimal(18, 6)
+  costPer1kOutput  Decimal @db.Decimal(18, 6)
+  monthlyQuota     Decimal? @db.Decimal(18, 2)
+  usedQuota        Decimal @default(0) @db.Decimal(18, 2)
+  
+  priority    Int      @default(0)
+  isActive    Boolean  @default(true)
+  weight      Int      @default(100) // 负载均衡权重
+  
+  // 状态
+  successRate Decimal @default(100) @db.Decimal(5, 2)
+  avgLatency  Int     @default(0) // ms
+  lastErrorAt DateTime?
+  errorCount  Int     @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联
+  providerModels ProviderModel[]
+  
+  @@map("provider_accounts")
+}
+
+// 支持的模型表
+model Model {
+  id          String   @id @default(cuid())
+  provider    ProviderType
+  modelId     String   // 厂商原始模型ID
+  name        String
+  description String?
+  
+  // 定价（对外售价）
+  pricePer1kInput   Decimal @db.Decimal(18, 6)
+  pricePer1kOutput  Decimal @db.Decimal(18, 6)
+  currency          String  @default("CNY")
+  
+  // 模型能力
+  supportsChat      Boolean @default(true)
+  supportsStreaming Boolean @default(true)
+  supportsVision    Boolean @default(false)
+  supportsTools     Boolean @default(false)
+  contextWindow     Int     // 上下文长度
+  maxTokens         Int     // 最大输出token
+  
+  // 状态
+  isActive    Boolean  @default(true)
+  isPublic    Boolean  @default(true)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联
+  providerModels ProviderModel[]
+  usages         Usage[]
+  
+  @@unique([provider, modelId])
+  @@map("models")
+}
+
+// 渠道与模型关联表（多对多）
+model ProviderModel {
+  id              String @id @default(cuid())
+  providerId      String
+  modelId         String
+  
+  // 渠道特定的模型ID映射
+  providerModelId String?
+  
+  // 该渠道是否支持此模型
+  isActive        Boolean @default(true)
+  
+  providerAccount ProviderAccount @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  model           Model           @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  
+  @@unique([providerId, modelId])
+  @@map("provider_models")
+}
+
+// 使用记录表
+model Usage {
+  id          String   @id @default(cuid())
+  
+  // 关联
+  userId      String
+  apiKeyId    String
+  modelId     String
+  providerId  String?  // 实际使用的渠道
+  
+  // 请求信息
+  requestId   String   @unique
+  requestType RequestType
+  
+  // Token使用
+  inputTokens  Int
+  outputTokens Int
+  totalTokens  Int
+  
+  // 费用
+  inputCost   Decimal @db.Decimal(18, 6)
+  outputCost  Decimal @db.Decimal(18, 6)
+  totalCost   Decimal @db.Decimal(18, 6)
+  
+  // 性能指标
+  latency     Int     // 总耗时 ms
+  ttft        Int?    // Time To First Token (流式)
+  
+  // 请求详情
+  ipAddress   String?
+  userAgent   String?
+  
+  // 状态
+  status      RequestStatus
+  errorCode   String?
+  errorMessage String?
+  
+  createdAt   DateTime @default(now())
+  
+  user        User            @relation(fields: [userId], references: [id])
+  apiKey      ApiKey          @relation(fields: [apiKeyId], references: [id])
+  model       Model           @relation(fields: [modelId], references: [id])
+  provider    ProviderAccount? @relation(fields: [providerId], references: [id])
+  
+  @@index([userId, createdAt])
+  @@index([apiKeyId, createdAt])
+  @@index([modelId, createdAt])
+  @@index([createdAt])
+  @@map("usages")
+}
+
+// 交易记录表（充值/消费）
+model Transaction {
+  id          String   @id @default(cuid())
+  userId      String
+  
+  type        TransactionType
+  amount      Decimal  @db.Decimal(18, 6)
+  currency    String   @default("CNY")
+  balanceAfter Decimal @db.Decimal(18, 6)
+  
+  // 关联信息
+  usageId     String?
+  paymentId   String?
+  description String?
+  
+  // 元数据
+  metadata    Json?
+  
+  createdAt   DateTime @default(now())
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId, createdAt])
+  @@map("transactions")
+}
+
+// 系统配置表
+model Config {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+  
+  @@map("configs")
+}
+
+// 枚举定义
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum ApiKeyPermission {
+  CHAT
+  COMPLETIONS
+  EMBEDDINGS
+  IMAGES
+  ADMIN
+}
+
+enum ProviderType {
+  OPENAI
+  ANTHROPIC
+  GOOGLE
+  BAIDU
+  ALIBABA
+  DOUBAO
+  ZHIPU
+  MOONSHOT
+  YI
+  MINIMAX
+  XUNFEI
+  CUSTOM
+}
+
+enum RequestType {
+  CHAT_COMPLETION
+  COMPLETION
+  EMBEDDING
+  IMAGE_GENERATION
+}
+
+enum RequestStatus {
+  SUCCESS
+  FAILED
+  TIMEOUT
+  RATE_LIMITED
+}
+
+enum TransactionType {
+  RECHARGE
+  CONSUMPTION
+  REFUND
+  BONUS
+  ADJUSTMENT
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@llm-hub/providers",
+  "version": "1.0.0",
+  "description": "Model provider adapters for LLM Hub",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@llm-hub/database": "workspace:*",
+    "axios": "^1.6.7",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.4.0"
+  }
+}
