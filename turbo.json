@@ -11,16 +11,11 @@
       "persistent": true
     },
     "lint": {
-      "dependsOn": ["^lint"]
+      "outputs": []
     },
     "test": {
-      "dependsOn": ["^test"]
-    },
-    "db:generate": {
-      "cache": false
-    },
-    "db:migrate": {
-      "cache": false
+      "dependsOn": ["build"],
+      "outputs": []
     }
   }
 }

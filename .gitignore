@@ -1,12 +1,9 @@
-# 忽略文件
-
 # Dependencies
 node_modules/
 .pnp
 .pnp.js
 
 # Build outputs
-.next/
 dist/
 build/
 *.tsbuildinfo
@@ -30,8 +27,10 @@ coverage/
 
 # Database
 *.db
-*.sqlite
-*.sqlite3
+*.db-journal
+
+# Docker
+.dockerignore
 
 # IDE
 .idea/
@@ -39,21 +38,14 @@ coverage/
 *.swp
 *.swo
 *~
-.DS_Store
 
-# Docker volumes
-postgres_data/
-redis_data/
+# OS
+.DS_Store
+Thumbs.db
 
 # Misc
 .cache/
-temp/
-tmp/
-*.pid
-*.seed
-*.pid.lock
-
-# SSL certificates
+.temp/
 *.pem
 *.key
-*.crt
+secrets/
