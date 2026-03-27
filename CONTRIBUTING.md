@@ -1,137 +1,88 @@
 # 贡献指南
 
-感谢您对LLM-Hub项目的关注！我们欢迎各种形式的贡献。
+感谢你对 LLM Hub 的兴趣！我们欢迎各种形式的贡献。
 
 ## 如何贡献
 
-### 1. 报告问题
+### 报告问题
 
-如果您发现了bug或有新功能建议，请通过[GitHub Issues](https://github.com/tenglei/llm-hub/issues)提交。
+如果你发现了 bug 或有功能建议：
 
-提交问题时请包含：
-- 问题的清晰描述
-- 复现步骤
-- 期望行为 vs 实际行为
-- 环境信息（操作系统、Node版本等）
-- 相关日志或截图
+1. 先搜索 [Issues](https://github.com/yourusername/llm-hub/issues) 确认是否已存在
+2. 如果没有，创建新 Issue，请包含：
+   - 问题描述
+   - 复现步骤
+   - 期望行为和实际行为
+   - 环境信息（操作系统、Node 版本等）
 
-### 2. 提交代码
+### 提交代码
 
-#### 开发流程
+1. Fork 本项目
+2. 创建你的功能分支 (`git checkout -b feature/amazing-feature`)
+3. 提交你的修改 (`git commit -m 'Add some amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 打开 Pull Request
 
-1. **Fork项目**
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/llm-hub.git
-   cd llm-hub
-   ```
-
-2. **创建分支**
-   ```bash
-   git checkout -b feature/your-feature-name
-   # 或
-   git checkout -b fix/your-bug-fix
-   ```
-
-3. **安装依赖**
-   ```bash
-   pnpm install
-   ```
-
-4. **进行开发**
-   - 遵循现有的代码风格
-   - 编写测试用例
-   - 更新相关文档
-
-5. **提交更改**
-   ```bash
-   git add .
-   git commit -m "feat: add new feature"
-   ```
-
-   提交信息格式：
-   - `feat:` 新功能
-   - `fix:` 修复bug
-   - `docs:` 文档更新
-   - `style:` 代码格式调整
-   - `refactor:` 代码重构
-   - `test:` 测试相关
-   - `chore:` 构建/工具相关
-
-6. **推送到Fork**
-   ```bash
-   git push origin feature/your-feature-name
-   ```
-
-7. **创建Pull Request**
-   - 在GitHub上创建PR
-   - 描述你的更改
-   - 关联相关Issue
-
-#### 代码规范
-
-- 使用TypeScript
-- 遵循ESLint规则
-- 编写清晰的注释
-- 保持函数简洁（不超过50行）
-
-### 3. 代码审查
-
-所有提交都需要经过代码审查：
-- 至少1个维护者批准
-- CI检查通过
-- 无冲突
-
-### 4. 发布流程
-
-- 版本号遵循[SemVer](https://semver.org/)
-- 发布说明包含所有变更
-
-## 开发指南
-
-### 项目结构
-
-```
-llm-hub/
-├── apps/
-│   ├── api/          # 后端API服务
-│   ├── admin/        # 管理后台
-│   └── web/          # 用户门户
-├── packages/
-│   ├── sdk/          # JavaScript SDK
-│   └── shared/       # 共享代码
-└── docs/             # 文档
-```
-
-### 本地开发
+### 开发环境搭建
 
 ```bash
-# 1. 启动数据库
-docker-compose -f infrastructure/docker/docker-compose.yml up postgres redis -d
+# 1. Fork 并克隆项目
+git clone https://github.com/YOUR_USERNAME/llm-hub.git
+cd llm-hub
 
-# 2. 配置环境变量
+# 2. 安装依赖
+npm install
+
+# 3. 配置环境变量
 cp .env.example .env
-# 编辑.env文件
+# 编辑 .env 文件
 
-# 3. 数据库迁移
-cd apps/api && pnpm db:migrate && pnpm db:seed
+# 4. 启动数据库和缓存
+docker-compose up -d postgres redis
 
-# 4. 启动开发服务器
-pnpm dev
+# 5. 执行数据库迁移
+npm run db:migrate
+npm run db:seed
+
+# 6. 启动开发服务器
+npm run dev
 ```
 
-## 社区
+### 代码规范
 
-- 💬 [Discord](https://discord.gg/llm-hub)
-- 🐦 [Twitter](https://twitter.com/llm_hub)
-- 📧 Email: dev@llm-hub.com
+- 使用 TypeScript
+- 遵循 ESLint 配置
+- 提交前运行测试：`npm test`
+- 保持代码简洁，添加必要注释
+
+### 提交信息规范
+
+使用 [Conventional Commits](https://www.conventionalcommits.org/)：
+
+- `feat:` 新功能
+- `fix:` 修复 bug
+- `docs:` 文档修改
+- `style:` 代码格式修改
+- `refactor:` 重构
+- `test:` 测试相关
+- `chore:` 构建/工具相关
+
+示例：
+```
+feat: add support for Gemini model
+fix: correct token calculation for streaming response
+docs: update API documentation
+```
 
 ## 行为准则
 
-- 互相尊重
-- 友善交流
-- 欢迎新人
-- 关注问题而非个人
+- 尊重他人，保持友善
+- 接受建设性批评
+- 关注对社区最有利的事情
 
-## 许可证
+## 联系方式
 
-通过提交代码，您同意您的贡献将在[MIT许可证](LICENSE)下发布。
+- GitHub Issues: https://github.com/yourusername/llm-hub/issues
+- Email: contact@llm-hub.com
+
+再次感谢你的贡献！

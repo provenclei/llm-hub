@@ -1,28 +1,32 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+所有项目的显著变更都将记录在此文件中。
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
+并且本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [1.0.0] - 2024-03-27
+## [Unreleased]
 
 ### Added
 - 初始版本发布
-- 支持 OpenAI GPT-3.5/4 模型
-- 支持 Anthropic Claude 3 模型
-- 基础API网关服务
-- Token计费系统
-- 用户认证与API Key管理
-- Docker部署支持
-- 管理后台基础框架
-- 用户门户网站框架
-- JavaScript SDK
-
-### Features
-- OpenAI兼容的API接口
+- 支持 15+ 主流大模型（OpenAI、Anthropic、阿里、Moonshot、智谱等）
+- OpenAI 兼容 API 接口
+- Token 计费系统
+- 用户管理和 API Key 管理
 - 流式响应支持
-- 多模型统一管理
-- 实时计费统计
-- 限流保护
-- 请求日志记录
+- Docker 部署支持
+- 管理员后台
+- 提供商账号池管理
+
+## [1.0.0] - 2026-03-27
+
+### Added
+- 项目初始化
+- 基础架构搭建（Node.js + TypeScript + PostgreSQL + Redis）
+- 多模型聚合网关
+- 智能路由与负载均衡
+- 批量采购管理功能
+- 完整的 API 文档
+
+[Unreleased]: https://github.com/yourusername/llm-hub/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/yourusername/llm-hub/releases/tag/v1.0.0
