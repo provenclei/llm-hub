@@ -1,297 +1,220 @@
-import { PrismaClient } from '@prisma/client';
-import { OpenAI } from 'openai';
-import { Anthropic } from '@anthropic-ai/sdk';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-const prisma = new PrismaClient();
+import { providerManager } from '@llm-hub/providers';
+import { prisma } from '@llm-hub/database';
+import { ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChunk } from '@llm-hub/providers';
 
 export interface Channel {
   id: string;
   name: string;
   provider: string;
-  credentials: any;
-  rateLimit: any;
+  apiKey: string;
+  baseUrl?: string;
+  weight: number;
   priority: number;
-}
-
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant' | 'function';
-  content: string;
-  name?: string;
+  costPer1kInput: number;
+  costPer1kOutput: number;
 }
 
 export class ChatService {
-  // 选择最佳渠道
+  /**
+   * 选择最佳渠道
+   */
   async selectChannel(modelId: string): Promise<Channel | null> {
-    const channels = await prisma.channel.findMany({
+    // 从数据库获取支持该模型的活跃渠道
+    const providerModels = await prisma.providerModel.findMany({
       where: {
-        status: 'active',
-        OR: [
-          { provider: modelId.split('/')[0] },
-          { supportedModels: { has: modelId } },
-        ],
+        modelId,
+        isActive: true,
+        providerAccount: {
+          isActive: true,
+        },
       },
-      orderBy: { priority: 'asc' },
+      include: {
+        providerAccount: true,
+      },
+      orderBy: {
+        providerAccount: {
+          priority: 'desc',
+        },
+      },
     });
 
-    // TODO: 实现更智能的路由策略（检查健康状态、负载等）
-    if (channels.length === 0) return null;
+    if (providerModels.length === 0) {
+      return null;
+    }
 
-    const channel = channels[0];
+    // 优先选择成功率高的渠道
+    const candidates = providerModels
+      .filter(pm => Number(pm.providerAccount.successRate) > 80)
+      .sort((a, b) => {
+        // 先按优先级，再按成功率
+        if (a.providerAccount.priority !== b.providerAccount.priority) {
+          return b.providerAccount.priority - a.providerAccount.priority;
+        }
+        return Number(b.providerAccount.successRate) - Number(a.providerAccount.successRate);
+      });
+
+    const selected = candidates[0] || providerModels[0];
+
     return {
-      id: channel.id,
-      name: channel.name,
-      provider: channel.provider,
-      credentials: channel.credentials as any,
-      rateLimit: channel.rateLimit as any,
-      priority: channel.priority,
+      id: selected.providerAccount.id,
+      name: selected.providerAccount.name,
+      provider: selected.providerAccount.provider,
+      apiKey: selected.providerAccount.apiKey,
+      baseUrl: selected.providerAccount.baseUrl || undefined,
+      weight: selected.providerAccount.weight,
+      priority: selected.providerAccount.priority,
+      costPer1kInput: Number(selected.providerAccount.costPer1kInput),
+      costPer1kOutput: Number(selected.providerAccount.costPer1kOutput),
     };
   }
 
-  // 创建对话完成
+  /**
+   * 创建聊天补全
+   */
   async createChatCompletion(
     channel: Channel,
-    model: string,
-    messages: ChatMessage[],
-    options: any
-  ) {
-    const adapter = this.getAdapter(channel);
-    return adapter.createChatCompletion(model, messages, options);
-  }
-
-  // 创建流式对话完成
-  async createChatCompletionStream(
-    channel: Channel,
-    model: string,
-    messages: ChatMessage[],
-    options: any
-  ) {
-    const adapter = this.getAdapter(channel);
-    return adapter.createChatCompletionStream(model, messages, options);
-  }
-
-  // 获取适配器
-  private getAdapter(channel: Channel) {
-    switch (channel.provider) {
-      case 'openai':
-        return new OpenAIAdapter(channel.credentials);
-      case 'anthropic':
-        return new AnthropicAdapter(channel.credentials);
-      case 'google':
-        return new GoogleAdapter(channel.credentials);
-      case 'azure':
-        return new AzureOpenAIAdapter(channel.credentials);
-      case 'baidu':
-        return new BaiduAdapter(channel.credentials);
-      case 'alibaba':
-        return new AlibabaAdapter(channel.credentials);
-      default:
-        throw new Error(`Unsupported provider: ${channel.provider}`);
-    }
-  }
-}
-
-// OpenAI 适配器
-class OpenAIAdapter {
-  private client: OpenAI;
-
-  constructor(credentials: any) {
-    this.client = new OpenAI({
-      apiKey: credentials.apiKey,
-      baseURL: credentials.baseUrl,
+    modelId: string,
+    messages: Array<{ role: string; content: string }>,
+    options: Partial<ChatCompletionRequest> = {}
+  ): Promise<ChatCompletionResponse> {
+    // 获取模型的原始 ID
+    const providerModel = await prisma.providerModel.findFirst({
+      where: {
+        providerId: channel.id,
+        model: {
+          modelId: modelId,
+        },
+      },
+      include: {
+        model: true,
+      },
     });
-  }
 
-  async createChatCompletion(model: string, messages: ChatMessage[], options: any) {
-    const response = await this.client.chat.completions.create({
-      model,
-      messages: messages as any,
-      temperature: options.temperature,
-      max_tokens: options.max_tokens,
-      top_p: options.top_p,
-      frequency_penalty: options.frequency_penalty,
-      presence_penalty: options.presence_penalty,
-      stream: false,
-    });
+    const actualModelId = providerModel?.providerModelId || modelId;
+
+    const { response, providerId } = await providerManager.chatCompletion(
+      actualModelId,
+      {
+        model: actualModelId,
+        messages,
+        temperature: options.temperature,
+        top_p: options.top_p,
+        max_tokens: options.max_tokens,
+        stream: false,
+        tools: options.tools,
+        tool_choice: options.tool_choice,
+      },
+      { type: 'priority' }
+    );
 
     return response;
   }
 
-  async *createChatCompletionStream(
-    model: string,
-    messages: ChatMessage[],
-    options: any
-  ): AsyncGenerator<any> {
-    const stream = await this.client.chat.completions.create({
-      model,
-      messages: messages as any,
-      temperature: options.temperature,
-      max_tokens: options.max_tokens,
-      stream: true,
+  /**
+   * 创建流式聊天补全
+   */
+  async createChatCompletionStream(
+    channel: Channel,
+    modelId: string,
+    messages: Array<{ role: string; content: string }>,
+    options: Partial<ChatCompletionRequest> = {}
+  ): Promise<AsyncGenerator<ChatCompletionChunk, void, unknown>> {
+    // 获取模型的原始 ID
+    const providerModel = await prisma.providerModel.findFirst({
+      where: {
+        providerId: channel.id,
+        model: {
+          modelId: modelId,
+        },
+      },
+      include: {
+        model: true,
+      },
     });
 
-    for await (const chunk of stream) {
-      yield chunk;
+    const actualModelId = providerModel?.providerModelId || modelId;
+
+    const streamGenerator = providerManager.chatCompletionStream(
+      actualModelId,
+      {
+        model: actualModelId,
+        messages,
+        temperature: options.temperature,
+        top_p: options.top_p,
+        max_tokens: options.max_tokens,
+        stream: true,
+        tools: options.tools,
+        tool_choice: options.tool_choice,
+      },
+      { type: 'priority' }
+    );
+
+    return streamGenerator;
+  }
+
+  /**
+   * 统计流式输出的 tokens
+   */
+  countStreamTokens(chunks: ChatCompletionChunk[]): number {
+    let totalTokens = 0;
+    for (const chunk of chunks) {
+      if (chunk.choices[0]?.delta?.content) {
+        // 简单估算，实际应该使用 tiktoken
+        totalTokens += Math.ceil(chunk.choices[0].delta.content.length / 4);
+      }
     }
-  }
-}
-
-// Anthropic Claude 适配器
-class AnthropicAdapter {
-  private client: Anthropic;
-
-  constructor(credentials: any) {
-    this.client = new Anthropic({
-      apiKey: credentials.apiKey,
-    });
+    return totalTokens;
   }
 
-  async createChatCompletion(model: string, messages: ChatMessage[], options: any) {
-    // 转换消息格式
-    const systemMessage = messages.find(m => m.role === 'system');
-    const chatMessages = messages.filter(m => m.role !== 'system');
-
-    const response = await this.client.messages.create({
-      model,
-      system: systemMessage?.content,
-      messages: chatMessages.map(m => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      })),
-      max_tokens: options.max_tokens || 4096,
-      temperature: options.temperature,
-      top_p: options.top_p,
+  /**
+   * 获取模型信息
+   */
+  async getModelInfo(modelId: string) {
+    const model = await prisma.model.findUnique({
+      where: { id: modelId },
     });
 
-    // 转换为OpenAI兼容格式
+    if (!model) {
+      return null;
+    }
+
     return {
-      id: response.id,
-      object: 'chat.completion',
-      created: Date.now(),
-      model: response.model,
-      choices: [{
-        index: 0,
-        message: {
-          role: 'assistant',
-          content: response.content[0]?.text || '',
-        },
-        finish_reason: response.stop_reason,
-      }],
-      usage: {
-        prompt_tokens: response.usage.input_tokens,
-        completion_tokens: response.usage.output_tokens,
-        total_tokens: response.usage.input_tokens + response.usage.output_tokens,
-      },
+      id: model.id,
+      name: model.name,
+      provider: model.provider,
+      pricePer1kInput: Number(model.pricePer1kInput),
+      pricePer1kOutput: Number(model.pricePer1kOutput),
+      contextWindow: model.contextWindow,
+      maxTokens: model.maxTokens,
+      supportsStreaming: model.supportsStreaming,
+      supportsVision: model.supportsVision,
+      supportsTools: model.supportsTools,
     };
   }
 
-  async *createChatCompletionStream(
-    model: string,
-    messages: ChatMessage[],
-    options: any
-  ): AsyncGenerator<any> {
-    // TODO: 实现流式响应
-    throw new Error('Anthropic streaming not implemented yet');
-  }
-}
-
-// Google Gemini 适配器
-class GoogleAdapter {
-  private client: GoogleGenerativeAI;
-
-  constructor(credentials: any) {
-    this.client = new GoogleGenerativeAI(credentials.apiKey);
-  }
-
-  async createChatCompletion(model: string, messages: ChatMessage[], options: any) {
-    const genModel = this.client.getGenerativeModel({ model });
-    
-    // 转换消息格式
-    const chat = genModel.startChat({
-      history: messages.slice(0, -1).map(m => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
-      })),
-    });
-
-    const result = await chat.sendMessage(messages[messages.length - 1].content);
-    const response = await result.response;
-
-    // 转换为OpenAI兼容格式
-    return {
-      id: `gen-${Date.now()}`,
-      object: 'chat.completion',
-      created: Date.now(),
-      model,
-      choices: [{
-        index: 0,
-        message: {
-          role: 'assistant',
-          content: response.text(),
-        },
-        finish_reason: 'stop',
-      }],
-      usage: {
-        prompt_tokens: 0, // Gemini API不返回token数
-        completion_tokens: 0,
-        total_tokens: 0,
+  /**
+   * 获取所有可用模型
+   */
+  async getAvailableModels() {
+    const models = await prisma.model.findMany({
+      where: {
+        isActive: true,
+        isPublic: true,
       },
-    };
-  }
-
-  async *createChatCompletionStream(
-    model: string,
-    messages: ChatMessage[],
-    options: any
-  ): AsyncGenerator<any> {
-    throw new Error('Google streaming not implemented yet');
-  }
-}
-
-// Azure OpenAI 适配器
-class AzureOpenAIAdapter extends OpenAIAdapter {
-  constructor(credentials: any) {
-    super({
-      apiKey: credentials.apiKey,
-      baseUrl: `${credentials.endpoint}/openai/deployments/${credentials.deployment}`,
+      orderBy: {
+        provider: 'asc',
+      },
     });
-  }
-}
 
-// 百度文心适配器 (简化实现)
-class BaiduAdapter {
-  constructor(credentials: any) {
-    // TODO: 实现百度API调用
-  }
-
-  async createChatCompletion(model: string, messages: ChatMessage[], options: any) {
-    throw new Error('Baidu adapter not implemented yet');
-  }
-
-  async *createChatCompletionStream(
-    model: string,
-    messages: ChatMessage[],
-    options: any
-  ): AsyncGenerator<any> {
-    throw new Error('Baidu streaming not implemented yet');
-  }
-}
-
-// 阿里通义适配器 (简化实现)
-class AlibabaAdapter {
-  constructor(credentials: any) {
-    // TODO: 实现阿里API调用
-  }
-
-  async createChatCompletion(model: string, messages: ChatMessage[], options: any) {
-    throw new Error('Alibaba adapter not implemented yet');
-  }
-
-  async *createChatCompletionStream(
-    model: string,
-    messages: ChatMessage[],
-    options: any
-  ): AsyncGenerator<any> {
-    throw new Error('Alibaba streaming not implemented yet');
+    return models.map(model => ({
+      id: model.id,
+      name: model.name,
+      description: model.description,
+      provider: model.provider,
+      contextWindow: model.contextWindow,
+      supportsStreaming: model.supportsStreaming,
+      supportsVision: model.supportsVision,
+      supportsTools: model.supportsTools,
+    }));
   }
 }

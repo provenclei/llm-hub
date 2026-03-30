@@ -3,7 +3,6 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { loginSchema, registerSchema } from '../schemas/chat';
-import { createApiKey } from '../services/auth';
 import { authenticateJwt } from '../plugins/auth';
 
 const prisma = new PrismaClient();
@@ -40,9 +39,13 @@ export async function authRoutes(app: FastifyInstance) {
     });
 
     // 生成JWT
+    if (!process.env.JWT_SECRET) {
+      throw new Error('JWT_SECRET is not defined');
+    }
+
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET!,
+      process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
@@ -87,9 +90,13 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     // 生成JWT
+    if (!process.env.JWT_SECRET) {
+      throw new Error('JWT_SECRET is not defined');
+    }
+
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET!,
+      process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 

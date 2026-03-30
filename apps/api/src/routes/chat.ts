@@ -25,8 +25,13 @@ export async function chatRoutes(app: FastifyInstance) {
     const body = chatCompletionSchema.parse(request.body);
     const { model, messages, stream = false, ...options } = body;
 
-    // 检查用户余额
-    const hasBalance = await billingService.checkBalance(request.apiKey!.userId);
+    // 预估费用
+    const estimatedInputTokens = billingService.estimateInputTokens(messages);
+    const estimatedOutputTokens = options.max_tokens || 1000;
+    const estimatedCost = await billingService.estimateCost(model, estimatedInputTokens, estimatedOutputTokens);
+
+    // 检查用户余额（含预留）
+    const hasBalance = await billingService.checkBalance(request.apiKey!.userId, estimatedCost);
     if (!hasBalance) {
       return reply.code(402).send({
         error: {
@@ -37,20 +42,20 @@ export async function chatRoutes(app: FastifyInstance) {
       });
     }
 
-    try {
-      // 选择最佳渠道
-      const channel = await chatService.selectChannel(model);
-      
-      if (!channel) {
-        return reply.code(503).send({
-          error: {
-            message: 'No available channel for the requested model',
-            type: 'service_error',
-            code: 'no_available_channel',
-          },
-        });
-      }
+    // 选择最佳渠道
+    const channel = await chatService.selectChannel(model);
+    
+    if (!channel) {
+      return reply.code(503).send({
+        error: {
+          message: 'No available channel for the requested model',
+          type: 'service_error',
+          code: 'no_available_channel',
+        },
+      });
+    }
 
+    try {
       // 流式响应
       if (stream) {
         reply.raw.writeHead(200, {
@@ -59,9 +64,6 @@ export async function chatRoutes(app: FastifyInstance) {
           'Connection': 'keep-alive',
         });
 
-        let totalInputTokens = 0;
-        let totalOutputTokens = 0;
-
         const streamGenerator = await chatService.createChatCompletionStream(
           channel,
           model,
@@ -69,10 +71,14 @@ export async function chatRoutes(app: FastifyInstance) {
           options
         );
 
+        let allChunks: any[] = [];
+        let finishReason: string | null = null;
+
         for await (const chunk of streamGenerator) {
-          if (chunk.usage) {
-            totalInputTokens = chunk.usage.prompt_tokens;
-            totalOutputTokens = chunk.usage.completion_tokens;
+          allChunks.push(chunk);
+          
+          if (chunk.choices[0]?.finish_reason) {
+            finishReason = chunk.choices[0].finish_reason;
           }
           
           reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`);
@@ -81,14 +87,19 @@ export async function chatRoutes(app: FastifyInstance) {
         reply.raw.write('data: [DONE]\n\n');
         reply.raw.end();
 
+        // 计算实际输出 tokens
+        const outputTokens = chatService.countStreamTokens(allChunks);
+        
         // 异步记录使用量和计费
-        await billingService.recordUsage({
+        billingService.recordUsage({
           userId: request.apiKey!.userId,
           apiKeyId: request.apiKey!.id,
           modelId: model,
           channelId: channel.id,
-          inputTokens: totalInputTokens,
-          outputTokens: totalOutputTokens,
+          inputTokens: estimatedInputTokens,
+          outputTokens: outputTokens,
+        }).catch(err => {
+          request.log.error('Failed to record usage:', err);
         });
 
         return reply;
@@ -131,12 +142,22 @@ export async function chatRoutes(app: FastifyInstance) {
         });
       }
 
-      if (error.code === 'rate_limit_exceeded') {
+      if (error.code === 'rate_limit_exceeded' || error.code === 'RATE_LIMIT_ERROR') {
         return reply.code(429).send({
           error: {
             message: 'Rate limit exceeded. Please try again later.',
             type: 'rate_limit_error',
             code: 'rate_limit_exceeded',
+          },
+        });
+      }
+
+      if (error.message === 'Insufficient balance') {
+        return reply.code(402).send({
+          error: {
+            message: 'Insufficient balance',
+            type: 'billing_error',
+            code: 'insufficient_balance',
           },
         });
       }
@@ -153,7 +174,6 @@ export async function chatRoutes(app: FastifyInstance) {
 
   // Embeddings
   app.post('/embeddings', { preHandler: [authenticateApiKey] }, async (request, reply) => {
-    // TODO: 实现embeddings接口
     return reply.code(501).send({
       error: {
         message: 'Embeddings endpoint coming soon',

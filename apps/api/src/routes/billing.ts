@@ -15,40 +15,57 @@ export async function billingRoutes(app: FastifyInstance) {
     return { balance: Number(user?.balance || 0) };
   });
 
-  // 获取账单列表
-  app.get('/invoices', { preHandler: [authenticateJwt] }, async (request, reply) => {
-    const invoices = await prisma.invoice.findMany({
-      where: { userId: request.user!.id },
-      orderBy: { periodEnd: 'desc' },
-    });
+  // 获取交易记录
+  app.get('/transactions', { preHandler: [authenticateJwt] }, async (request, reply) => {
+    const page = parseInt((request.query as any).page) || 1;
+    const limit = Math.min(parseInt((request.query as any).limit) || 20, 100);
+
+    const [transactions, total] = await Promise.all([
+      prisma.transaction.findMany({
+        where: { userId: request.user!.id },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.transaction.count({
+        where: { userId: request.user!.id },
+      }),
+    ]);
 
     return {
-      data: invoices.map(inv => ({
-        id: inv.id,
-        period: {
-          start: inv.periodStart.toISOString(),
-          end: inv.periodEnd.toISOString(),
-        },
-        totalTokens: inv.totalTokens,
-        totalCost: Number(inv.totalCost),
-        status: inv.status,
-        createdAt: inv.createdAt.toISOString(),
+      data: transactions.map(t => ({
+        id: t.id,
+        type: t.type,
+        amount: Number(t.amount),
+        currency: t.currency,
+        balanceAfter: Number(t.balanceAfter),
+        description: t.description,
+        createdAt: t.createdAt,
       })),
+      pagination: {
+        page,
+        limit,
+        total,
+        total_pages: Math.ceil(total / limit),
+      },
     };
   });
 
   // 获取定价信息
   app.get('/pricing', async (request, reply) => {
     const models = await prisma.model.findMany({
-      where: { status: 'active' },
+      where: { isActive: true },
       select: {
         id: true,
         name: true,
         provider: true,
-        pricingInput: true,
-        pricingOutput: true,
+        pricePer1kInput: true,
+        pricePer1kOutput: true,
         contextWindow: true,
-        features: true,
+        supportsChat: true,
+        supportsStreaming: true,
+        supportsVision: true,
+        supportsTools: true,
       },
     });
 
@@ -58,12 +75,17 @@ export async function billingRoutes(app: FastifyInstance) {
         name: m.name,
         provider: m.provider,
         pricing: {
-          input: Number(m.pricingInput),
-          output: Number(m.pricingOutput),
-          currency: 'USD',
+          input: Number(m.pricePer1kInput),
+          output: Number(m.pricePer1kOutput),
+          currency: 'CNY',
         },
         contextWindow: m.contextWindow,
-        features: m.features,
+        features: {
+          chat: m.supportsChat,
+          streaming: m.supportsStreaming,
+          vision: m.supportsVision,
+          tools: m.supportsTools,
+        },
       })),
     };
   });
